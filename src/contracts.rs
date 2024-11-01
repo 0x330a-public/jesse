@@ -211,6 +211,13 @@ pub async fn generate_metadata_signature<T>(signer: T, request_fid: u64, deadlin
     Ok(signature.as_bytes())
 }
 
+/// get the owner's fid that they are registered as, or none if 0x0
+pub async fn fid_of(owner: Address, provider: &RootProvider<Http<Client>, Optimism>) -> Result<u64> {
+    let registry = IIdRegistry::new(ID_REGISTRY_ADDRESS, provider);
+    let fid = registry.idOf(owner).call().await.map(|ret| ret.fid.to())?;
+    Ok(fid)
+}
+
 /// sign and broadcast a register transaction, returning the signer's new fid
 pub async fn register_fid(recovery_option: Option<Address>, provider: &RootProvider<Http<Client>, Optimism>) -> Result<u64> {
 
