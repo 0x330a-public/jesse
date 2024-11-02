@@ -17,3 +17,5 @@ eyre = "0.6"
 alloy-rpc-types-anvil = "0.5"
 alloy-provider = { version = "0.5", features = ["anvil-api", "anvil-node"] }
 alloy-node-bindings = { version = "0.5" }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"

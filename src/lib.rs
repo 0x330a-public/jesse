@@ -4,7 +4,7 @@ mod contracts;
 use alloy::network::EthereumWallet;
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::transports::http::Http;
-pub use contracts::register_fid;
+pub use contracts::{register_fid, fid_of, sign_key_metadata};
 use eyre::Result;
 use op_alloy::network::Optimism;
 use reqwest::Client;

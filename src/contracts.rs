@@ -5,16 +5,15 @@ use alloy::providers::fillers::TxFiller;
 use alloy::providers::{Provider, RootProvider, WalletProvider};
 use alloy::signers::Signer;
 use alloy::sol;
-use alloy::sol_types::private::u256;
-use alloy::sol_types::{eip712_domain, Eip712Domain, SolCall, SolEventInterface, SolStruct};
+use alloy::sol_types::{eip712_domain, Eip712Domain, SolCall, SolEventInterface, SolStruct, SolValue};
 use alloy::transports::http::Http;
 use alloy::transports::Transport;
-use alloy_primitives::aliases::B32;
-use alloy_primitives::{address, Address, Bytes, IntoLogData};
+use alloy_primitives::{address, Address, Bytes, IntoLogData, U256};
 use eyre::{bail, eyre, Result};
 use op_alloy::network::Optimism;
 use reqwest::Client;
 use std::ops::{Div, Mul};
+use std::time::SystemTime;
 
 sol! {
     /// to encode to eip712 data
@@ -186,23 +185,13 @@ const KEY_REQUEST_VALIDATOR_DOMAIN: Eip712Domain = eip712_domain! {
     verifying_contract: address!("00000000FC700472606ED4fA22623Acf62c60553"),
 };
 
-/// Generate the signature that a wallet should sign for EIP712 registration given the parameters:
-///
-/// `to` - the to-be owner of the fid
-///
-/// `recovery` - optionally for someone that can recover this fid to their own account
-pub async fn generate_registration_signature(to: Address, recovery: Option<Address>) -> Result<B32> {
-
-    todo!()
-}
-
 /// Generates bytes of a SignedKeyRequest to include as the metadata signature parameter
-pub async fn generate_metadata_signature<T>(signer: T, request_fid: u64, deadline: u64, signer_public_key: [u8;32]) -> Result<[u8;65]>
+pub async fn sign_key_metadata<T>(signer: &T, request_fid: u64, deadline: u64, signer_public_key: [u8;32]) -> Result<[u8;65]>
     where T: Signer + Send + Sync {
 
     let request = SignedKeyRequest {
-        requestFid: u256(request_fid),
-        deadline: u256(deadline),
+        requestFid: U256::from(request_fid),
+        deadline: U256::from(deadline),
         key: Bytes::from(signer_public_key)
     };
 
@@ -211,14 +200,60 @@ pub async fn generate_metadata_signature<T>(signer: T, request_fid: u64, deadlin
     Ok(signature.as_bytes())
 }
 
+/// Generates the `Add` key signature, different from the signed key request metadata, for a user
+///
+/// May be useful for adding a key to a fid as an Ethereum transaction from a different evm address!
+pub async fn add_key_signature<T>(signer: &T, request_fid: u64, deadline: u64, signer_public_key: [u8; 32]) -> Result<[u8; 65]>
+    where T: Signer + Send + Sync {
+    todo!()
+}
+
+const ED_25519_KEY_TYPE: u32 = 1;
+const METADATA_TYPE_SIGNED: u8 = 1;
+
+/// Add a key to the user's fid calling the [IKeyGateway]'s `add(uint32 keyType, bytes calldata key, uint8 metadataType, bytes calldata metadata)` function
+///
+/// Assumes the provider can sign as well, external signing SOON tm
+pub async fn add_key<T>(owner: Address, signer_public_key: [u8;32], signer: &T, provider: &RootProvider<impl Transport + Clone, Optimism>) -> Result<()>
+    where T: Signer + Send + Sync {
+
+    let fid = fid_of(owner, provider).await?;
+
+    let deadline = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs() + 3600; // one hour deadline?
+
+    let key_metadata_signature = sign_key_metadata(signer, fid, deadline, signer_public_key).await?;
+
+    let metadata = SignedKeyRequestMetadata {
+        requestFid: U256::from(fid),
+        requestSigner: owner,
+        signature: Bytes::from(key_metadata_signature),
+        deadline: Default::default(),
+    };
+
+    let key_gateway = IKeyGateway::new(KEY_GATEWAY_ADDRESS, provider);
+
+    let tx_hash = key_gateway.add(
+        ED_25519_KEY_TYPE,
+        Bytes::from(signer_public_key),
+        METADATA_TYPE_SIGNED,
+        Bytes::from(metadata.abi_encode())
+    ).send().await?.watch().await?;
+
+
+    println!("tx_hash: {:?}", tx_hash);
+
+    Ok(())
+}
+
 /// get the owner's fid that they are registered as, or none if 0x0
-pub async fn fid_of(owner: Address, provider: &RootProvider<Http<Client>, Optimism>) -> Result<u64> {
+pub async fn fid_of(owner: Address, provider: &RootProvider<impl Transport + Clone, Optimism>) -> Result<u64> {
     let registry = IIdRegistry::new(ID_REGISTRY_ADDRESS, provider);
     let fid = registry.idOf(owner).call().await.map(|ret| ret.fid.to())?;
     Ok(fid)
 }
 
 /// sign and broadcast a register transaction, returning the signer's new fid
+/// Errors here could indicate any of the [IIdRegistryErrors] (currently unaccounted for)
 pub async fn register_fid(recovery_option: Option<Address>, provider: &RootProvider<Http<Client>, Optimism>) -> Result<u64> {
 
     let recovery_address = if let Some(address) = recovery_option {
@@ -228,11 +263,11 @@ pub async fn register_fid(recovery_option: Option<Address>, provider: &RootProvi
     };
 
     // get the price for 1 storage on register
-    let gateway = IIdGateway::new(ID_GATEWAY_ADDRESS, provider);
+    let id_gateway = IIdGateway::new(ID_GATEWAY_ADDRESS, provider);
 
-    let price = gateway.price_0().call().await?._0;
+    let price = id_gateway.price_0().call().await?._0;
 
-    let request= gateway.register_0(recovery_address)
+    let request= id_gateway.register_0(recovery_address)
             .value(price);
     // idk if just anvil is broken but without this it was failing with an out of gas error
     let estimate:f64 = request.estimate_gas().await? as f64 * 2f64;
@@ -263,6 +298,8 @@ mod tests {
     use alloy_provider::ext::AnvilApi;
     use alloy_provider::network::EthereumWallet;
     use alloy_provider::{Provider, ProviderBuilder, WalletProvider};
+    use ed25519_dalek::ed25519::signature::rand_core::OsRng;
+    use ed25519_dalek::SecretKey;
     use eyre::Result;
     use op_alloy::network::Optimism;
 
@@ -281,6 +318,11 @@ mod tests {
         provider.anvil_set_balance(Address::from(provider.default_signer_address()), parse_ether("1")?).await?;
 
         let fid = register_fid(None, provider.root()).await?;
+
+        // get an ed25519 key for this test
+        // (I don't think it's actually verified on-chain as ed25519 but oh well)
+        let sc = SecretKey::rand(&mut OsRng);
+
         println!("registered fid is: {fid}");
         Ok(())
     }
