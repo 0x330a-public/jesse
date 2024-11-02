@@ -1,18 +1,13 @@
 use crate::contracts::IIdGateway::IIdGatewayEvents;
-use alloy::consensus::{Transaction, TxReceipt};
-use alloy::network::Network;
-use alloy::providers::fillers::TxFiller;
-use alloy::providers::{Provider, RootProvider, WalletProvider};
+use alloy::providers::Provider;
 use alloy::signers::Signer;
-use alloy::sol;
-use alloy::sol_types::{eip712_domain, Eip712Domain, SolCall, SolEventInterface, SolStruct, SolValue};
+use alloy::sol_types::{eip712_domain, Eip712Domain, SolEventInterface, SolValue};
 use alloy::transports::http::Http;
-use alloy::transports::Transport;
-use alloy_primitives::{address, Address, Bytes, IntoLogData, U256};
+use alloy::sol;
+use alloy_primitives::{address, Address, Bytes, Signature, U256};
 use eyre::{bail, eyre, Result};
 use op_alloy::network::Optimism;
 use reqwest::Client;
-use std::ops::{Div, Mul};
 use std::time::SystemTime;
 
 sol! {
@@ -186,18 +181,17 @@ const KEY_REQUEST_VALIDATOR_DOMAIN: Eip712Domain = eip712_domain! {
 };
 
 /// Generates bytes of a SignedKeyRequest to include as the metadata signature parameter
-pub async fn sign_key_metadata<T>(signer: &T, request_fid: u64, deadline: u64, signer_public_key: [u8;32]) -> Result<[u8;65]>
-    where T: Signer + Send + Sync {
+pub async fn sign_key_metadata<T: Signer + Sync + Send>(signer: &T, request_fid: u64, deadline: u64, signer_public_key: [u8;32]) -> Result<Signature> {
 
     let request = SignedKeyRequest {
         requestFid: U256::from(request_fid),
+        key: Bytes::from(signer_public_key),
         deadline: U256::from(deadline),
-        key: Bytes::from(signer_public_key)
     };
 
     let signature = signer.sign_typed_data(&request, &KEY_REQUEST_VALIDATOR_DOMAIN).await?;
 
-    Ok(signature.as_bytes())
+    Ok(signature)
 }
 
 /// Generates the `Add` key signature, different from the signed key request metadata, for a user
@@ -214,8 +208,7 @@ const METADATA_TYPE_SIGNED: u8 = 1;
 /// Add a key to the user's fid calling the [IKeyGateway]'s `add(uint32 keyType, bytes calldata key, uint8 metadataType, bytes calldata metadata)` function
 ///
 /// Assumes the provider can sign as well, external signing SOON tm
-pub async fn add_key<T>(owner: Address, signer_public_key: [u8;32], signer: &T, provider: &RootProvider<impl Transport + Clone, Optimism>) -> Result<()>
-    where T: Signer + Send + Sync {
+pub async fn add_key<T: Signer + Sync + Send>(owner: Address, signer_public_key: [u8;32], signer: &T, provider: &impl Provider<Http<Client>, Optimism>) -> Result<()> {
 
     let fid = fid_of(owner, provider).await?;
 
@@ -226,27 +219,24 @@ pub async fn add_key<T>(owner: Address, signer_public_key: [u8;32], signer: &T, 
     let metadata = SignedKeyRequestMetadata {
         requestFid: U256::from(fid),
         requestSigner: owner,
-        signature: Bytes::from(key_metadata_signature),
-        deadline: Default::default(),
+        signature: Bytes::from(key_metadata_signature.as_bytes()),
+        deadline: U256::from(deadline),
     };
 
     let key_gateway = IKeyGateway::new(KEY_GATEWAY_ADDRESS, provider);
 
-    let tx_hash = key_gateway.add(
+    let pending = key_gateway.add(
         ED_25519_KEY_TYPE,
-        Bytes::from(signer_public_key),
+        Bytes::from(signer_public_key.abi_encode_packed()),
         METADATA_TYPE_SIGNED,
         Bytes::from(metadata.abi_encode())
-    ).send().await?.watch().await?;
-
-
-    println!("tx_hash: {:?}", tx_hash);
-
+    ).send().await?;
+    let _tx_hash = pending.watch().await?;
     Ok(())
 }
 
 /// get the owner's fid that they are registered as, or none if 0x0
-pub async fn fid_of(owner: Address, provider: &RootProvider<impl Transport + Clone, Optimism>) -> Result<u64> {
+pub async fn fid_of(owner: Address, provider: &impl Provider<Http<Client>, Optimism>) -> Result<u64> {
     let registry = IIdRegistry::new(ID_REGISTRY_ADDRESS, provider);
     let fid = registry.idOf(owner).call().await.map(|ret| ret.fid.to())?;
     Ok(fid)
@@ -254,7 +244,7 @@ pub async fn fid_of(owner: Address, provider: &RootProvider<impl Transport + Clo
 
 /// sign and broadcast a register transaction, returning the signer's new fid
 /// Errors here could indicate any of the [IIdRegistryErrors] (currently unaccounted for)
-pub async fn register_fid(recovery_option: Option<Address>, provider: &RootProvider<Http<Client>, Optimism>) -> Result<u64> {
+pub async fn register_fid(recovery_option: Option<Address>, provider: &impl Provider<Http<Client>, Optimism>) -> Result<u64> {
 
     let recovery_address = if let Some(address) = recovery_option {
         address
@@ -274,7 +264,7 @@ pub async fn register_fid(recovery_option: Option<Address>, provider: &RootProvi
     let request = request
         .gas(estimate as u64).send().await?;
     let tx = request.watch().await?;
-    let transaction = provider.get_transaction_by_hash(tx).await?.ok_or(eyre!("Missing transaction"))?;
+    let _ = provider.get_transaction_by_hash(tx).await?.ok_or(eyre!("Missing transaction"))?;
     let receipt = provider.get_transaction_receipt(tx).await?.ok_or(eyre!("Missing transaction receipt"))?;
 
     // would be good to handle specific errors here!
@@ -291,41 +281,52 @@ pub async fn register_fid(recovery_option: Option<Address>, provider: &RootProvi
 
 #[cfg(test)]
 mod tests {
-    use crate::contracts::register_fid;
+    use crate::contracts::{add_key, register_fid};
+    use alloy::hex;
     use alloy::signers::local::PrivateKeySigner;
     use alloy_primitives::utils::parse_ether;
-    use alloy_primitives::Address;
     use alloy_provider::ext::AnvilApi;
     use alloy_provider::network::EthereumWallet;
-    use alloy_provider::{Provider, ProviderBuilder, WalletProvider};
+    use alloy_provider::ProviderBuilder;
     use ed25519_dalek::ed25519::signature::rand_core::OsRng;
-    use ed25519_dalek::SecretKey;
+    use ed25519_dalek::{SigningKey, VerifyingKey};
     use eyre::Result;
     use op_alloy::network::Optimism;
 
     #[tokio::test]
     async fn test_basic_anvil() -> Result<()> {
 
-        let wallet = EthereumWallet::from(PrivateKeySigner::random());
+        let signer = PrivateKeySigner::random();
+
+        let wallet = EthereumWallet::from(signer.clone());
         let rpc_url = "http://127.0.0.1:8545"; // anvil forked op mainnet
 
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
+            .wallet(wallet.clone())
             .network::<Optimism>()
-            .wallet(wallet)
             .on_http(rpc_url.parse()?);
 
-        provider.anvil_set_balance(Address::from(provider.default_signer_address()), parse_ether("1")?).await?;
+        let owner_address = signer.address();
 
-        let fid = register_fid(None, provider.root()).await?;
+        provider.anvil_set_balance(owner_address, parse_ether("1")?).await?;
+        provider.anvil_set_logging(true).await?;
+
+        let fid = register_fid(None, &provider).await?;
 
         // get an ed25519 key for this test
         // (I don't think it's actually verified on-chain as ed25519 but oh well)
-        let sc = SecretKey::rand(&mut OsRng);
+        let sk = SigningKey::generate(&mut OsRng);
+        let pk = VerifyingKey::from(&sk);
+        let pub_bytes = pk.to_bytes();
+
+        println!("pub bytes: {}", hex::encode(pub_bytes));
+
+        add_key(owner_address, pub_bytes, &signer, &provider).await?;
 
         println!("registered fid is: {fid}");
+        println!("added key: {}", hex::encode(pub_bytes));
         Ok(())
     }
-
 
 }
