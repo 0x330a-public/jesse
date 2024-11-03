@@ -5,7 +5,7 @@ use alloy::network::EthereumWallet;
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::transports::http::Http;
 use eyre::Result;
-use op_alloy::network::Optimism;
+use op_alloy_network::Optimism;
 use reqwest::Client;
 
 // Expose the basic onchain registration / add key / hash generation functions

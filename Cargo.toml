@@ -9,7 +9,7 @@ tokio = { version = "1", features = ["full"] }
 reqwest = "0.12"
 alloy-primitives = "0.8"
 alloy = { version = "0.5", features = ["full", "eip712", "rpc-client"] }
-op-alloy = { git = "https://github.com/alloy-rs/op-alloy.git", rev = "1a9faf8d2dc050b4eb35887913878c5ee3763369", features = ["full"] }
+op-alloy-network = "0.5"
 
 eyre = "0.6"
 

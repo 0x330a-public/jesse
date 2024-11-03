@@ -6,10 +6,10 @@ use alloy::transports::http::Http;
 use alloy::sol;
 use alloy_primitives::{address, Address, Bytes, Signature, B256, U256};
 use eyre::{bail, eyre, Result};
-use op_alloy::network::Optimism;
 use reqwest::Client;
 use std::time::SystemTime;
 use alloy::transports::Transport;
+use op_alloy_network::Optimism;
 
 sol! {
     
@@ -413,7 +413,7 @@ mod tests {
     use ed25519_dalek::ed25519::signature::rand_core::OsRng;
     use ed25519_dalek::{SigningKey, VerifyingKey};
     use eyre::Result;
-    use op_alloy::network::Optimism;
+    use op_alloy_network::Optimism;
 
     #[tokio::test]
     async fn test_basic_anvil() -> Result<()> {
