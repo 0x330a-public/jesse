@@ -5,7 +5,6 @@ authors = ["0x330a"]
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1", features = ["full"] }
 reqwest = "0.12"
 alloy-primitives = "0.8"
 alloy = { version = "0.5", features = ["full", "eip712", "rpc-client"] }
@@ -14,6 +13,7 @@ op-alloy-network = "0.5"
 eyre = "0.6"
 
 [dev-dependencies]
+tokio = { version = "1", features = ["full"] }
 alloy-rpc-types-anvil = "0.5"
 alloy-provider = { version = "0.5", features = ["anvil-api", "anvil-node"] }
 alloy-node-bindings = { version = "0.5" }
