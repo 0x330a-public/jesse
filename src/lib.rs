@@ -4,12 +4,22 @@ mod contracts;
 use alloy::network::EthereumWallet;
 use alloy::providers::{Provider, ProviderBuilder};
 use alloy::transports::http::Http;
-pub use contracts::{register_fid, fid_of, sign_key_metadata};
 use eyre::Result;
 use op_alloy::network::Optimism;
 use reqwest::Client;
 
-pub fn default_provider(wallet: EthereumWallet) -> Result<impl Provider<Http<Client>,Optimism>> {
+// Expose the basic onchain registration / add key / hash generation functions
+pub use crate::contracts::{generate_add_key_hash,
+                           get_nonce,
+                           key_add_sign_hash,
+                           one_hour_deadline,
+                           sign_key_metadata,
+                           sign_key_request_metadata,
+                           sign_key_request_sign_hash};
+// Need this as a return
+pub use crate::contracts::SignedKeyRequestMetadata;
+
+pub fn default_provider(wallet: EthereumWallet) -> Result<impl Provider<Http<Client>, Optimism>> {
     Ok(
         ProviderBuilder::new()
             .with_recommended_fillers()

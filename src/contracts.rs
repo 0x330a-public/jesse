@@ -1,17 +1,31 @@
 use crate::contracts::IIdGateway::IIdGatewayEvents;
 use alloy::providers::Provider;
 use alloy::signers::Signer;
-use alloy::sol_types::{eip712_domain, Eip712Domain, SolEventInterface, SolValue};
+use alloy::sol_types::{eip712_domain, Eip712Domain, SolEventInterface, SolStruct, SolValue};
 use alloy::transports::http::Http;
 use alloy::sol;
-use alloy_primitives::{address, Address, Bytes, Signature, U256};
+use alloy_primitives::{address, Address, Bytes, Signature, B256, U256};
 use eyre::{bail, eyre, Result};
 use op_alloy::network::Optimism;
 use reqwest::Client;
 use std::time::SystemTime;
+use alloy::transports::Transport;
 
 sol! {
-    /// to encode to eip712 data
+    
+    /// to encode eip712 data addFor call
+    #[derive(Debug)]
+    struct Add {
+        address owner;
+        uint32 keyType;
+        bytes key;
+        uint8 metadataType;
+        bytes metadata;
+        uint256 nonce;
+        uint256 deadline;
+    }
+    
+    /// to encode to eip712 data registerFor call
     #[derive(Debug, Default)]
     struct Register {
         address to;
@@ -38,7 +52,16 @@ sol! {
     }
 
     #[sol(rpc)]
-    contract IIdGateway {
+    interface Nonces {
+        /**
+        * @dev Returns the next unused nonce for an address.
+        */
+        function nonces(address owner) public view virtual returns (uint256);
+    }
+
+    #[sol(rpc)]
+    interface IIdGateway is Nonces {
+        
         /**
          * @notice Calculate the total price to register, equal to 1 storage unit.
          *
@@ -77,6 +100,46 @@ sol! {
             address recovery,
             uint256 extraStorage
         ) external payable returns (uint256 fid, uint256 overpayment);
+        
+        /**
+        * @notice Register a new Farcaster ID (fid) to any address. A signed message from the address
+        *         must be provided which approves both the to and the recovery. The address must not
+        *         have an fid.
+        *
+        * @param to       Address which will own the fid.
+        * @param recovery Address which can recover the fid. Set to zero to disable recovery.
+        * @param deadline Expiration timestamp of the signature.
+        * @param sig      EIP-712 Register signature signed by the to address.
+        *
+        * @return fid registered FID.
+        */
+        function registerFor(
+            address to,
+            address recovery,
+            uint256 deadline,
+            bytes calldata sig
+        ) external payable returns (uint256 fid, uint256 overpayment);
+    
+        /**
+         * @notice Register a new Farcaster ID (fid) to any address and rent additional storage.
+         *         A signed message from the address must be provided which approves both the to
+         *         and the recovery. The address must not have an fid.
+         *
+         * @param to           Address which will own the fid.
+         * @param recovery     Address which can recover the fid. Set to zero to disable recovery.
+         * @param deadline     Expiration timestamp of the signature.
+         * @param sig          EIP-712 Register signature signed by the to address.
+         * @param extraStorage Number of additional storage units to rent.
+         *
+         * @return fid registered FID.
+         */
+        function registerFor(
+            address to,
+            address recovery,
+            uint256 deadline,
+            bytes calldata sig,
+            uint256 extraStorage
+        ) external payable returns (uint256 fid, uint256 overpayment);
 
         /**
         * @dev Emit an event when a new Farcaster ID is registered.
@@ -98,8 +161,7 @@ sol! {
     }
 
     #[sol(rpc, abi)]
-    contract IIdRegistry {
-        #[derive(Debug)]
+    interface IIdRegistry is Nonces {
         /// @dev Revert when the caller does not have the authority to perform the action.
         error Unauthorized();
 
@@ -126,7 +188,7 @@ sol! {
     }
 
     #[sol(rpc, abi)]
-    contract IKeyGateway {
+    contract IKeyGateway is Nonces {
         /**
         * @notice Add a key associated with the caller's fid, setting the key state to ADDED.
         *
@@ -180,6 +242,13 @@ const KEY_REQUEST_VALIDATOR_DOMAIN: Eip712Domain = eip712_domain! {
     verifying_contract: address!("00000000FC700472606ED4fA22623Acf62c60553"),
 };
 
+const KEY_GATEWAY_DOMAIN: Eip712Domain = eip712_domain! {
+    name: "Farcaster KeyGateway",
+    version: "1",
+    chain_id: 10,
+    verifying_contract: KEY_GATEWAY_ADDRESS,
+};
+
 /// Generates bytes of a SignedKeyRequest to include as the metadata signature parameter
 pub async fn sign_key_metadata<T: Signer + Sync + Send>(signer: &T, request_fid: u64, deadline: u64, signer_public_key: [u8;32]) -> Result<Signature> {
 
@@ -194,16 +263,69 @@ pub async fn sign_key_metadata<T: Signer + Sync + Send>(signer: &T, request_fid:
     Ok(signature)
 }
 
+pub async fn get_nonce(fid_owner: Address, key_or_id_gateway: Address, provider: &impl Provider<Http<Client>, Optimism>) -> Result<u64> {
+    let nonce_impl = Nonces::new(key_or_id_gateway, provider);
+    let nonce = nonce_impl.nonces(fid_owner).call().await?;
+    Ok(nonce._0.to())
+}
+
 /// Generates the `Add` key signature, different from the signed key request metadata, for a user
 ///
 /// May be useful for adding a key to a fid as an Ethereum transaction from a different evm address!
-pub async fn add_key_signature<T>(signer: &T, request_fid: u64, deadline: u64, signer_public_key: [u8; 32]) -> Result<[u8; 65]>
-    where T: Signer + Send + Sync {
+pub fn generate_add_key_hash(owner: Address, nonce: u64, signer_public_key: [u8; 32], metadata_struct: SignedKeyRequestMetadata) -> Result<B256> {
+
+    let add_struct = Add {
+        owner,
+        keyType: ED25519_KEY_TYPE,
+        key: Bytes::from(signer_public_key),
+        metadataType: METADATA_TYPE_SIGNED,
+        metadata: Bytes::from(metadata_struct.abi_encode()),
+        nonce: U256::from(nonce),
+        deadline: U256::from(one_hour_deadline()?),
+    };
+
+    Ok(add_struct.eip712_signing_hash(&KEY_GATEWAY_DOMAIN))
+}
+
+/// Designed to be used by wrapping / proving a SignedKeyRequest's hash has been signed by the request_signer which owns request_fid
+/// deadlines must match signed data and this metadata and be in the future from when the block is confirmed
+pub fn sign_key_request_metadata(request_fid: u64, request_signer: Address, signed_key_request_signature: Signature, deadline: u64) -> Result<SignedKeyRequestMetadata> {
+    Ok(SignedKeyRequestMetadata {
+        requestSigner: request_signer,
+        requestFid: U256::from(request_fid),
+        signature: Bytes::from(signed_key_request_signature.as_bytes()),
+        deadline: U256::from(deadline)
+    })
+}
+
+/// Generate the EIP-712 signing hash of a SignedKeyRequest
+/// to be signed and wrapped into a SignedKeyRequestMetadata object via [sign_key_request_metadata]
+///
+/// Returns the B256 / 32 byte EIP-712 hash bound to the KeyRequestValidator's domain
+pub fn sign_key_request_sign_hash(request_fid: u64, deadline: u64, signer_public_key: [u8; 32]) -> Result<B256> {
+
+    let request = SignedKeyRequest {
+        requestFid: U256::from(request_fid),
+        key: Bytes::from(signer_public_key),
+        deadline: U256::from(deadline),
+    };
+
+    Ok(request.eip712_signing_hash(&KEY_REQUEST_VALIDATOR_DOMAIN))
+}
+
+/// Generate the EIP-712 signing hash of an [Add] typehash
+/// to be signed and passed into the addFor parameter of the [KeyGateway]
+pub fn key_add_sign_hash() -> Result<B256> {
+
     todo!()
 }
 
-const ED_25519_KEY_TYPE: u32 = 1;
+const ED25519_KEY_TYPE: u32 = 1;
 const METADATA_TYPE_SIGNED: u8 = 1;
+
+pub fn one_hour_deadline() -> Result<u64> {
+    Ok(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs() + 3600) // one hour deadline?
+}
 
 /// Add a key to the user's fid calling the [IKeyGateway]'s `add(uint32 keyType, bytes calldata key, uint8 metadataType, bytes calldata metadata)` function
 ///
@@ -212,7 +334,7 @@ pub async fn add_key<T: Signer + Sync + Send>(owner: Address, signer_public_key:
 
     let fid = fid_of(owner, provider).await?;
 
-    let deadline = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs() + 3600; // one hour deadline?
+    let deadline = one_hour_deadline()?;
 
     let key_metadata_signature = sign_key_metadata(signer, fid, deadline, signer_public_key).await?;
 
@@ -226,7 +348,7 @@ pub async fn add_key<T: Signer + Sync + Send>(owner: Address, signer_public_key:
     let key_gateway = IKeyGateway::new(KEY_GATEWAY_ADDRESS, provider);
 
     let pending = key_gateway.add(
-        ED_25519_KEY_TYPE,
+        ED25519_KEY_TYPE,
         Bytes::from(signer_public_key.abi_encode_packed()),
         METADATA_TYPE_SIGNED,
         Bytes::from(metadata.abi_encode())
