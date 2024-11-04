@@ -1,5 +1,7 @@
 # Jesse
 
+![crates.io](https://img.shields.io/crates/v/jesse.svg)
+
 We need to cook
 
 **Your agents need to be posting to a sufficiently decentralized network**
