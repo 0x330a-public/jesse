@@ -271,7 +271,7 @@ pub async fn get_nonce(fid_owner: Address, key_or_id_gateway: Address, provider:
 /// Generates the `Register` signing hash
 ///
 /// Used for calling registerFor with parameters from a user, including the signature of this hash
-pub fn register_sign_hash(owner: Address, recovery: Option<Address>, nonce: u64, deadline: u64) -> Result<B256> {
+pub fn register_sign_hash(owner: Address, recovery: Option<Address>, nonce: u64, deadline: u64) -> B256 {
     let register_struct = Register {
         to: owner,
         recovery: recovery.unwrap_or_default(),
@@ -279,7 +279,7 @@ pub fn register_sign_hash(owner: Address, recovery: Option<Address>, nonce: u64,
         deadline: U256::from(deadline),
     };
 
-    Ok(register_struct.eip712_signing_hash(&ID_GATEWAY_DOMAIN))
+    register_struct.eip712_signing_hash(&ID_GATEWAY_DOMAIN)
 }
 
 /// Designed to be used by wrapping / proving a SignedKeyRequest's hash has been signed by the request_signer which owns request_fid
