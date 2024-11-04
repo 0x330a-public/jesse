@@ -422,11 +422,8 @@ pub async fn register_fid(recovery_option: Option<Address>, provider: &impl Prov
     let price = id_gateway.price_0().call().await?._0;
 
     let request = id_gateway.register_0(recovery_option.unwrap_or_default())
-        .value(price);
-    // idk if just anvil is broken but without this it was failing with an out of gas error
-    let estimate: f64 = request.estimate_gas().await? as f64 * 2f64;
-    let request = request
-        .gas(estimate as u64).send().await?;
+        .value(price)
+        .send().await?;
     let tx = request.watch().await?;
     let _ = provider.get_transaction_by_hash(tx).await?.ok_or(eyre!("Missing transaction"))?;
     let receipt = provider.get_transaction_receipt(tx).await?.ok_or(eyre!("Missing transaction receipt"))?;
