@@ -9,8 +9,7 @@ use op_alloy_network::Optimism;
 use reqwest::Client;
 
 // Expose the basic onchain registration / add key / hash generation functions
-pub use crate::contracts::{generate_add_key_hash,
-                           get_nonce,
+pub use crate::contracts::{get_nonce,
                            key_add_sign_hash,
                            one_hour_deadline,
                            sign_key_metadata,

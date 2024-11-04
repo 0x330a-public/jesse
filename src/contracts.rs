@@ -1,10 +1,9 @@
 use crate::contracts::IIdGateway::IIdGatewayEvents;
 use alloy::providers::Provider;
 use alloy::signers::Signer;
-use alloy::sol;
 use alloy::sol_types::{eip712_domain, Eip712Domain, SolEventInterface, SolStruct, SolValue};
 use alloy::transports::http::Http;
-use alloy::transports::Transport;
+use alloy::sol;
 use alloy_primitives::{address, Address, Bytes, Signature, B256, U256};
 use eyre::{bail, eyre, Result};
 use op_alloy_network::Optimism;
@@ -282,23 +281,6 @@ pub fn generate_register_hash(owner: Address, recovery: Option<Address>, nonce: 
     Ok(register_struct.eip712_signing_hash(&ID_GATEWAY_DOMAIN))
 }
 
-/// Generates the `Add` signing hash, different from the signed key request metadata, for a user
-///
-/// May be useful for adding a key to a fid as an Ethereum transaction from a different evm address!
-pub fn generate_add_key_hash(owner: Address, nonce: u64, signer_public_key: [u8; 32], metadata_struct: &SignedKeyRequestMetadata) -> Result<B256> {
-    let add_struct = Add {
-        owner,
-        keyType: ED25519_KEY_TYPE,
-        key: Bytes::from(signer_public_key),
-        metadataType: METADATA_TYPE_SIGNED,
-        metadata: Bytes::from(metadata_struct.abi_encode()),
-        nonce: U256::from(nonce),
-        deadline: U256::from(one_hour_deadline()?),
-    };
-
-    Ok(add_struct.eip712_signing_hash(&KEY_GATEWAY_DOMAIN))
-}
-
 /// Designed to be used by wrapping / proving a SignedKeyRequest's hash has been signed by the request_signer which owns request_fid
 /// deadlines must match signed data and this metadata and be in the future from when the block is confirmed
 pub fn sign_key_request_metadata(request_fid: u64, request_signer: Address, signed_key_request_signature: Signature, deadline: u64) -> Result<SignedKeyRequestMetadata> {
@@ -314,19 +296,19 @@ pub fn sign_key_request_metadata(request_fid: u64, request_signer: Address, sign
 /// to be signed and wrapped into a SignedKeyRequestMetadata object via [sign_key_request_metadata]
 ///
 /// Returns the B256 / 32 byte EIP-712 hash bound to the KeyRequestValidator's domain
-pub fn sign_key_request_sign_hash(request_fid: u64, deadline: u64, signer_public_key: [u8; 32]) -> Result<B256> {
+pub fn sign_key_request_sign_hash(request_fid: u64, deadline: u64, signer_public_key: [u8; 32]) -> B256 {
     let request = SignedKeyRequest {
         requestFid: U256::from(request_fid),
         key: Bytes::from(signer_public_key),
         deadline: U256::from(deadline),
     };
 
-    Ok(request.eip712_signing_hash(&KEY_REQUEST_VALIDATOR_DOMAIN))
+    request.eip712_signing_hash(&KEY_REQUEST_VALIDATOR_DOMAIN)
 }
 
 /// Generate the EIP-712 signing hash of an [Add] typehash
 /// to be signed and passed into the addFor parameter of the [KeyGateway]
-pub fn key_add_sign_hash(owner: Address, key_bytes: [u8;32], metadata: SignedKeyRequestMetadata, nonce: u64, deadline: u64) -> Result<B256> {
+pub fn key_add_sign_hash(owner: Address, key_bytes: [u8; 32], metadata: SignedKeyRequestMetadata, nonce: u64, deadline: u64) -> B256 {
     let add_struct = Add {
         owner,
         keyType: ED25519_KEY_TYPE,
@@ -337,7 +319,7 @@ pub fn key_add_sign_hash(owner: Address, key_bytes: [u8;32], metadata: SignedKey
         deadline: U256::from(deadline),
     };
 
-    Ok(add_struct.eip712_signing_hash(&KEY_GATEWAY_DOMAIN))
+    add_struct.eip712_signing_hash(&KEY_GATEWAY_DOMAIN)
 }
 
 const ED25519_KEY_TYPE: u32 = 1;
@@ -376,19 +358,22 @@ pub async fn add_key<T: Signer + Sync + Send>(owner: Address, signer_public_key:
     Ok(())
 }
 
-pub async fn add_key_for(owner: Address, deadline: u64, signature: Signature, key_bytes: [u8;32], signed_key_request_metadata: SignedKeyRequestMetadata, provider: &impl Provider<Http<Client>, Optimism>) -> Result<()> {
-
+/// Same as [add_key] except designed to be called from a provider signer of a different account,
+/// letting you add a key for someone that doesn't want to pay TX fees, the key gateway companion to [register_fid_for]
+pub async fn add_key_for(owner: Address, deadline: u64, signature: Signature, key_bytes: [u8; 32], signed_key_request_metadata: SignedKeyRequestMetadata, provider: &impl Provider<Http<Client>, Optimism>) -> Result<()> {
     let key_gateway = IKeyGateway::new(KEY_GATEWAY_ADDRESS, provider);
 
     let pending = key_gateway.addFor(
         owner,
         ED25519_KEY_TYPE,
-        Bytes::from(key_bytes),
+        Bytes::from(key_bytes.abi_encode_packed()),
         METADATA_TYPE_SIGNED,
         Bytes::from(signed_key_request_metadata.abi_encode()),
         U256::from(deadline),
-        Bytes::from(signature.as_bytes())
-    ).send().await?;
+        Bytes::from(signature.as_bytes()),
+    ).into_transaction_request();
+
+    let pending = provider.send_transaction(pending).await?;
 
     let _tx_hash = pending.watch().await?;
     Ok(())
@@ -401,6 +386,8 @@ pub async fn fid_of(owner: Address, provider: &impl Provider<Http<Client>, Optim
     Ok(fid)
 }
 
+/// Same as [register_fid] except designed to be called from a provider signer of a different account,
+/// letting you register for someone that doesn't want to pay TX fees, the id gateway companion to [add_key_for]
 pub async fn register_fid_for(for_owner: Address, recovery: Option<Address>, signature: Signature, deadline: u64, provider: &impl Provider<Http<Client>, Optimism>) -> Result<u64> {
     let id_gateway = IIdGateway::new(ID_GATEWAY_ADDRESS, provider);
     let price = id_gateway.price_0().call().await?._0;
@@ -458,8 +445,9 @@ pub async fn register_fid(recovery_option: Option<Address>, provider: &impl Prov
 
 #[cfg(test)]
 mod tests {
+    use crate::contracts::Nonces::NoncesInstance;
     use crate::contracts::{add_key, add_key_for, generate_register_hash, register_fid, register_fid_for, ID_GATEWAY_ADDRESS, KEY_GATEWAY_ADDRESS};
-    use alloy::hex;
+    use crate::{key_add_sign_hash, one_hour_deadline, sign_key_request_metadata, sign_key_request_sign_hash};
     use alloy::signers::local::PrivateKeySigner;
     use alloy::signers::Signer;
     use alloy_primitives::utils::parse_ether;
@@ -470,16 +458,44 @@ mod tests {
     use ed25519_dalek::{SigningKey, VerifyingKey};
     use eyre::Result;
     use op_alloy_network::Optimism;
-    use crate::contracts::Nonces::NoncesInstance;
-    use crate::{generate_add_key_hash, one_hour_deadline, sign_key_request_metadata, sign_key_request_sign_hash};
 
     #[tokio::test]
-    async fn test_basic_anvil() -> Result<()> {
+    async fn test_basic_anvil_register_add() -> Result<()> {
+        let app_signer = PrivateKeySigner::random();
+        let app_wallet = EthereumWallet::from(app_signer.clone());
+
+        let rpc_url = "http://127.0.0.1:8545"; // anvil forked op mainnet
+
+        let provider = ProviderBuilder::new()
+            .with_recommended_fillers()
+            .wallet(app_wallet.clone())
+            .network::<Optimism>()
+            .on_http(rpc_url.parse()?);
+
+        let app_address = app_signer.address();
+
+        provider.anvil_set_balance(app_address, parse_ether("1")?).await?;
+
+        let app_fid = register_fid(None, &provider).await?;
+
+        // get an ed25519 key for this test
+        // (I don't think it's actually verified on-chain as ed25519 but oh well)
+        let sk = SigningKey::generate(&mut OsRng);
+        let pk = VerifyingKey::from(&sk);
+        let pub_bytes = pk.to_bytes();
+
+        add_key(app_address, pub_bytes, &app_signer, &provider).await?;
+
+        Ok(())
+    }
+
+
+    #[tokio::test]
+    async fn test_basic_anvil_register_add_for() -> Result<()> {
         let app_signer = PrivateKeySigner::random();
         let app_wallet = EthereumWallet::from(app_signer.clone());
 
         let user_signer = PrivateKeySigner::random();
-        let user_wallet = EthereumWallet::from(user_signer.clone());
 
         let rpc_url = "http://127.0.0.1:8545"; // anvil forked op mainnet
 
@@ -499,7 +515,7 @@ mod tests {
         // current user_address nonce for IdGateway
         let current_id_nonce = gateway_nonce.nonces(user_address).call().await?._0;
 
-        let deadline= one_hour_deadline()?;
+        let deadline = one_hour_deadline()?;
 
         let register_hash = generate_register_hash(user_address, None, current_id_nonce.to(), deadline)?;
 
@@ -513,20 +529,20 @@ mod tests {
         let pk = VerifyingKey::from(&sk);
         let pub_bytes = pk.to_bytes();
 
-        println!("pub bytes: {}", hex::encode(pub_bytes));
-
         let key_gateway_nonce = NoncesInstance::new(KEY_GATEWAY_ADDRESS, &provider);
         let current_key_nonce = key_gateway_nonce.nonces(user_address).call().await?._0;
 
-        let key_signature = sign_key_request_sign_hash(fid, deadline, pub_bytes)?;
-        let metadata_sig = user_signer.sign_hash(&key_signature).await?;
+        let metadata_hash = sign_key_request_sign_hash(fid, deadline, pub_bytes);
+
+        let metadata_sig = user_signer.sign_hash(&metadata_hash).await?;
+
         let metadata = sign_key_request_metadata(fid, user_address, metadata_sig, deadline)?;
-        let add_hash = generate_add_key_hash(user_address, current_key_nonce.to(), pub_bytes, &metadata)?;
+        let add_hash = key_add_sign_hash(user_address, pub_bytes, metadata.clone(), current_key_nonce.to(), deadline);
 
         let add_signature = user_signer.sign_hash(&add_hash).await?;
-        
+
         add_key_for(user_address, deadline, add_signature, pub_bytes, metadata, &provider).await?;
-        
+
         Ok(())
     }
 }
