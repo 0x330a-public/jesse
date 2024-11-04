@@ -14,7 +14,12 @@ pub use crate::contracts::{get_nonce,
                            one_hour_deadline,
                            sign_key_metadata,
                            sign_key_request_metadata,
-                           sign_key_request_sign_hash};
+                           sign_key_request_sign_hash,
+                           register_fid,
+                           register_fid_for,
+                           add_key,
+                           add_key_for,
+};
 // Need this as a return
 pub use crate::contracts::SignedKeyRequestMetadata;
 
