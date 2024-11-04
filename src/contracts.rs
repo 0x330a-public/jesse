@@ -223,9 +223,9 @@ sol! {
 
 }
 
-const ID_GATEWAY_ADDRESS: Address = address!("00000000Fc25870C6eD6b6c7E41Fb078b7656f69");
+pub const ID_GATEWAY_ADDRESS: Address = address!("00000000Fc25870C6eD6b6c7E41Fb078b7656f69");
 const ID_REGISTRY_ADDRESS: Address = address!("00000000Fc6c5F01Fc30151999387Bb99A9f489b");
-const KEY_GATEWAY_ADDRESS: Address = address!("00000000fC56947c7E7183f8Ca4B62398CaAdf0B");
+pub const KEY_GATEWAY_ADDRESS: Address = address!("00000000fC56947c7E7183f8Ca4B62398CaAdf0B");
 
 const ID_GATEWAY_DOMAIN: Eip712Domain = eip712_domain! {
     name: "Farcaster IdGateway",

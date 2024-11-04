@@ -23,6 +23,7 @@ pub use crate::contracts::{add_key,
                            sign_key_request_metadata,
                            sign_key_request_sign_hash,
 };
+pub use crate::contracts::{ID_GATEWAY_ADDRESS, KEY_GATEWAY_ADDRESS};
 
 pub fn default_provider(wallet: EthereumWallet) -> Result<impl Provider<Http<Client>, Optimism>> {
     Ok(
