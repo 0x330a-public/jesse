@@ -261,6 +261,7 @@ pub async fn sign_key_metadata<T: Signer + Sync + Send>(signer: &T, request_fid:
     Ok(signature)
 }
 
+/// Get the current nonce for a given address and user, address being probably [KeyGateway] or [IdGateway]
 pub async fn get_nonce(fid_owner: Address, key_or_id_gateway: Address, provider: &impl Provider<Http<Client>, Optimism>) -> Result<u64> {
     let nonce_impl = Nonces::new(key_or_id_gateway, provider);
     let nonce = nonce_impl.nonces(fid_owner).call().await?;
@@ -270,7 +271,7 @@ pub async fn get_nonce(fid_owner: Address, key_or_id_gateway: Address, provider:
 /// Generates the `Register` signing hash
 ///
 /// Used for calling registerFor with parameters from a user, including the signature of this hash
-pub fn generate_register_hash(owner: Address, recovery: Option<Address>, nonce: u64, deadline: u64) -> Result<B256> {
+pub fn register_sign_hash(owner: Address, recovery: Option<Address>, nonce: u64, deadline: u64) -> Result<B256> {
     let register_struct = Register {
         to: owner,
         recovery: recovery.unwrap_or_default(),
@@ -443,7 +444,7 @@ pub async fn register_fid(recovery_option: Option<Address>, provider: &impl Prov
 #[cfg(test)]
 mod tests {
     use crate::contracts::Nonces::NoncesInstance;
-    use crate::contracts::{add_key, add_key_for, generate_register_hash, register_fid, register_fid_for, ID_GATEWAY_ADDRESS, KEY_GATEWAY_ADDRESS};
+    use crate::contracts::{add_key, add_key_for, register_sign_hash, register_fid, register_fid_for, ID_GATEWAY_ADDRESS, KEY_GATEWAY_ADDRESS};
     use crate::{key_add_sign_hash, one_hour_deadline, sign_key_request_metadata, sign_key_request_sign_hash};
     use alloy::signers::local::PrivateKeySigner;
     use alloy::signers::Signer;
@@ -514,7 +515,7 @@ mod tests {
 
         let deadline = one_hour_deadline()?;
 
-        let register_hash = generate_register_hash(user_address, None, current_id_nonce.to(), deadline)?;
+        let register_hash = register_sign_hash(user_address, None, current_id_nonce.to(), deadline)?;
 
         let register_signature = user_signer.sign_hash(&register_hash).await?;
 

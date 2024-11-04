@@ -8,20 +8,21 @@ use eyre::Result;
 use op_alloy_network::Optimism;
 use reqwest::Client;
 
+// Need this as a return
+pub use crate::contracts::SignedKeyRequestMetadata;
 // Expose the basic onchain registration / add key / hash generation functions
-pub use crate::contracts::{get_nonce,
+pub use crate::contracts::{add_key,
+                           add_key_for,
+                           get_nonce,
                            key_add_sign_hash,
                            one_hour_deadline,
+                           register_fid,
+                           register_fid_for,
+                           register_sign_hash,
                            sign_key_metadata,
                            sign_key_request_metadata,
                            sign_key_request_sign_hash,
-                           register_fid,
-                           register_fid_for,
-                           add_key,
-                           add_key_for,
 };
-// Need this as a return
-pub use crate::contracts::SignedKeyRequestMetadata;
 
 pub fn default_provider(wallet: EthereumWallet) -> Result<impl Provider<Http<Client>, Optimism>> {
     Ok(
