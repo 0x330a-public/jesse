@@ -23,7 +23,8 @@ pub use crate::contracts::{add_key,
                            sign_key_request_metadata,
                            sign_key_request_sign_hash,
                            build_register_fid_for,
-                           build_add_key_for
+                           build_add_key_for,
+                           fid_of
 };
 
 // Expose the Warpcast fname specific methods
