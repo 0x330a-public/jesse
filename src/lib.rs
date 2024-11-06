@@ -22,7 +22,18 @@ pub use crate::contracts::{add_key,
                            sign_key_metadata,
                            sign_key_request_metadata,
                            sign_key_request_sign_hash,
+                           build_register_fid_for,
+                           build_add_key_for
 };
+
+// Expose the Warpcast fname specific methods
+pub use crate::warpcast::{register_with_warpcast,
+                          fname_sign_hash,
+                          get_transfers_for_username,
+                          get_transfers_for_fid,
+                          Transfer
+};
+
 pub use crate::contracts::{ID_GATEWAY_ADDRESS, KEY_GATEWAY_ADDRESS};
 
 pub fn default_provider(wallet: EthereumWallet) -> Result<impl Provider<Http<Client>, Optimism>> {

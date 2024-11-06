@@ -34,7 +34,7 @@ Check out an [example](https://github.com/0x330a-public/jesse-bot/blob/master/sr
 
 The basic flow for signing up your own ethereum signer and adding a key would be something like:
 ```rust
-fn main() -> Result<()> {
+async fn main() -> Result<()> {
     // get our ed25519 signing keys
     let ed25519_key = SigningKey::generate(&mut OsRng);
     let ed25519_pub = VerifyingKey::from(&ed25519_key);

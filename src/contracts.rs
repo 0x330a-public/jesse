@@ -9,6 +9,7 @@ use eyre::{bail, eyre, Result};
 use op_alloy_network::Optimism;
 use reqwest::Client;
 use std::time::SystemTime;
+use alloy::rpc::types::TransactionRequest;
 
 sol! {
     
@@ -359,9 +360,14 @@ pub async fn add_key<T: Signer + Sync + Send>(owner: Address, signer_public_key:
     Ok(())
 }
 
-/// Same as [add_key] except designed to be called from a provider signer of a different account,
-/// letting you add a key for someone that doesn't want to pay TX fees, the key gateway companion to [register_fid_for]
-pub async fn add_key_for(owner: Address, deadline: u64, signature: Signature, key_bytes: [u8; 32], signed_key_request_metadata: SignedKeyRequestMetadata, provider: &impl Provider<Http<Client>, Optimism>) -> Result<()> {
+/// Builds the transaction request for [add_key_for]
+pub async fn build_add_key_for(
+    owner: Address,
+    deadline: u64,
+    signature: Signature,
+    key_bytes: [u8; 32],
+    signed_key_request_metadata: SignedKeyRequestMetadata,
+    provider: &impl Provider<Http<Client>, Optimism>) -> Result<TransactionRequest> {
     let key_gateway = IKeyGateway::new(KEY_GATEWAY_ADDRESS, provider);
 
     let pending = key_gateway.addFor(
@@ -373,6 +379,27 @@ pub async fn add_key_for(owner: Address, deadline: u64, signature: Signature, ke
         U256::from(deadline),
         Bytes::from(signature.as_bytes()),
     ).into_transaction_request();
+    Ok(pending)
+}
+
+/// Same as [add_key] except designed to be called from a provider signer of a different account,
+/// letting you add a key for someone that doesn't want to pay TX fees, the key gateway companion to [register_fid_for]
+pub async fn add_key_for(
+    owner: Address,
+    deadline: u64,
+    signature: Signature,
+    key_bytes: [u8; 32],
+    signed_key_request_metadata: SignedKeyRequestMetadata,
+    provider: &impl Provider<Http<Client>, Optimism>) -> Result<()> {
+    
+    let pending = build_add_key_for(
+        owner,
+        deadline,
+        signature,
+        key_bytes,
+        signed_key_request_metadata,
+        provider,
+    ).await?;
 
     let pending = provider.send_transaction(pending).await?;
 
@@ -387,19 +414,27 @@ pub async fn fid_of(owner: Address, provider: &impl Provider<Http<Client>, Optim
     Ok(fid)
 }
 
-/// Same as [register_fid] except designed to be called from a provider signer of a different account,
-/// letting you register for someone that doesn't want to pay TX fees, the id gateway companion to [add_key_for]
-pub async fn register_fid_for(for_owner: Address, recovery: Option<Address>, signature: Signature, deadline: u64, provider: &impl Provider<Http<Client>, Optimism>) -> Result<u64> {
+/// Build the actual registerFor call, used by [register_fid_for], could be used to extract and sign externally
+pub async fn build_register_fid_for(for_owner: Address, recovery: Option<Address>, signature: Signature, deadline: u64, provider: &impl Provider<Http<Client>, Optimism>) -> Result<TransactionRequest> {
     let id_gateway = IIdGateway::new(ID_GATEWAY_ADDRESS, provider);
     let price = id_gateway.price_0().call().await?._0;
 
-    let tx = id_gateway.registerFor_0(
-        for_owner,
-        recovery.unwrap_or_default(),
-        U256::from(deadline),
-        Bytes::from(signature.as_bytes()),
-    ).value(price)
-        .send().await?
+    Ok(
+        id_gateway.registerFor_0(
+            for_owner,
+            recovery.unwrap_or_default(),
+            U256::from(deadline),
+            Bytes::from(signature.as_bytes()),
+        ).value(price).into_transaction_request()
+    )
+}
+
+/// Same as [register_fid] except designed to be called from a provider signer of a different account,
+/// letting you register for someone that doesn't want to pay TX fees, the id gateway companion to [add_key_for]
+pub async fn register_fid_for(for_owner: Address, recovery: Option<Address>, signature: Signature, deadline: u64, provider: &impl Provider<Http<Client>, Optimism>) -> Result<u64> {
+    let request = build_register_fid_for(for_owner, recovery, signature, deadline, provider).await?;
+
+    let tx = provider.send_transaction(request).await?
         .watch().await?;
 
     let receipt = provider.get_transaction_receipt(tx).await?.ok_or(eyre!("Missing transaction receipt"))?;
@@ -487,7 +522,6 @@ mod tests {
         Ok(())
     }
 
-
     #[tokio::test]
     async fn test_basic_anvil_register_add_for() -> Result<()> {
         let app_signer = PrivateKeySigner::random();
@@ -515,7 +549,7 @@ mod tests {
 
         let deadline = one_hour_deadline()?;
 
-        let register_hash = register_sign_hash(user_address, None, current_id_nonce.to(), deadline)?;
+        let register_hash = register_sign_hash(user_address, None, current_id_nonce.to(), deadline);
 
         let register_signature = user_signer.sign_hash(&register_hash).await?;
 
