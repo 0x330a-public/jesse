@@ -31,7 +31,8 @@
     "build:debug": "napi build --platform",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "ava",
-    "version": "napi version"
+    "version": "napi version",
+    "universal": "napi universal"
   },
   "packageManager": "yarn@4.5.2"
 }
