@@ -1,6 +1,5 @@
 [package]
 name = "jesse"
-version = "0.2.2"
 authors = ["0x330a"]
 edition = "2021"
 description = "Register and add signers to the farcaster network easily"

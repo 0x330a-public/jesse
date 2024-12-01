@@ -1,5 +1,5 @@
 {
-  "name": "jesse-napi-linux-x64-musl",
+  "name": "@0x330a/jesse-napi-linux-x64-musl",
   "version": "0.1.0",
   "os": [
     "linux"

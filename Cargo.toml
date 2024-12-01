@@ -1,6 +1,9 @@
 [workspace]
 members = ["jesse", "jesse-napi"]
 
+[workspace.package]
+version = "0.2.2"
+
 resolver = "2"
 
 [workspace.dependencies]

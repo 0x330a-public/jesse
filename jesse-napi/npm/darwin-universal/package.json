@@ -1,5 +1,5 @@
 {
-  "name": "jesse-napi-darwin-universal",
+  "name": "@0x330a/jesse-napi-darwin-universal",
   "version": "0.1.0",
   "os": [
     "darwin"

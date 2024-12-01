@@ -1,5 +1,5 @@
 {
-  "name": "jesse-napi-win32-x64-msvc",
+  "name": "@0x330a/jesse-napi-win32-x64-msvc",
   "version": "0.1.0",
   "os": [
     "win32"
