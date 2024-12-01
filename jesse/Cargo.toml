@@ -6,6 +6,7 @@ description = "Register and add signers to the farcaster network easily"
 license = "MIT"
 version = "0.2.2"
 repository = "https://github.com/0x330a-public/jesse"
+readme = "../README.md"
 
 [dependencies]
 reqwest = "0.12"
