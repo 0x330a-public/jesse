@@ -112,7 +112,7 @@ pub async fn transfer_fname(
 
 /// Register the name with Warpcast's server, before submitting a username update to 'claim' the name
 /// by updating your user profile data
-pub async fn register_with_warpcast(
+pub async fn register_fname(
     username: String,
     user_name_proof: PrimitiveSignature,
     for_fid: u64,

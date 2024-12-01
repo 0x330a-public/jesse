@@ -1,6 +1,5 @@
 {
   "name": "@0x330a/jesse-napi-win32-x64-msvc",
-  "version": "0.1.0",
   "repository": "https://github.com/0x330a-public/jesse",
   "os": [
     "win32"
@@ -15,5 +14,6 @@
   "license": "MIT",
   "engines": {
     "node": ">= 10"
-  }
+  },
+  "version": "0.1.1"
 }

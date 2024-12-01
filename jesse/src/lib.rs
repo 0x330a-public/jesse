@@ -27,7 +27,7 @@ pub use crate::contracts::{add_key,
 };
 
 // Expose the Warpcast fname specific methods
-pub use crate::warpcast::{register_with_warpcast,
+pub use crate::warpcast::{register_fname,
                           transfer_fname,
                           fname_sign_hash,
                           get_transfers_for_username,

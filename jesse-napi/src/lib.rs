@@ -44,6 +44,11 @@ fn parse_address(address: String) -> Result<Address, Error> {
         .map_err(|_| Error::from(JesseError::HexSerialization))
 }
 
+fn parse_hex(hex_string: String) -> Result<Vec<u8>, Error> {
+    hex::decode(hex_string.replace("0x", ""))
+        .map_err(|_| Error::from(JesseError::HexSerialization))
+}
+
 #[napi]
 pub async fn register_fid(
     account: &Account,
@@ -68,13 +73,26 @@ pub async fn register_fid(
 }
 
 #[napi]
-/// Return the owner of the fname as an optional fid (if it is owned)
-pub async fn owner_of_fname(fname: String) -> Result<Option<u32>, Error> {
+pub async fn add_key(
+    account: &Account,
+    key_hex: String
+) -> Result<bool, Error> {
+    let key: [u8;32] = {
+        let decoded_key = parse_hex(key_hex)?;
+        let mut key_bytes = [0u8;32];
+        key_bytes.copy_from_slice(&decoded_key[..]);
+        key_bytes
+    };
 
-    let transfers: Vec<jesse::Transfer> = jesse::get_transfers_for_username(&fname)
-        .await.map_err(|_| Error::from(JesseError::Generic))?;
+    let owner_address = account.private_key.address();
 
-    Ok(transfers.last().map(|transfer| transfer.to as u32))
+    let provider = jesse::default_provider(EthereumWallet::new(account.private_key.clone()))
+        .map_err(|_| Error::from(JesseError::Generic))?;
+
+    jesse::add_key(owner_address, key, &account.private_key, &provider).await
+        .map_err(|_| Error::from(JesseError::Generic))?;
+
+    Ok(true)
 }
 
 #[napi]
@@ -100,9 +118,34 @@ pub async fn transfer_fname(account: &Account, fname: String, to_fid: u32) -> Re
 }
 
 #[napi]
-pub async fn fid_of(address: String) -> Result<u32, Error> {
+pub async fn register_fname(account: &Account, fname: String) -> Result<bool, Error> {
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
 
-    let address = parse_address(address)?;
+    let owner_address = account.private_key.address();
+
+    let provider = jesse::default_provider(EthereumWallet::new(account.private_key.clone()))
+        .map_err(|_| Error::from(JesseError::Generic))?;
+
+    let signature = jesse::fname_sign_hash(owner_address, fname.clone(), timestamp);
+    let our_fid = jesse::fid_of(owner_address, &provider).await
+        .map_err(|_| Error::from(JesseError::Generic))?;
+    let signature = account.private_key.sign_hash(&signature).await
+        .map_err(|_| Error::from(JesseError::Generic))?;
+
+    jesse::register_fname(fname, signature, our_fid, owner_address, timestamp).await
+        .map_err(|_| Error::from(JesseError::Generic))?;
+
+    Ok(true)
+}
+
+#[napi]
+/// Get the registered fid of an ethereum address, or 0 if it's unregistered
+pub async fn fid_of_address(address_hex: String) -> Result<u32, Error> {
+
+    let address = parse_address(address_hex)?;
 
     let public_provider = jesse::public_provider()
         .map_err(|_| Error::from(JesseError::Generic))?;
@@ -114,6 +157,18 @@ pub async fn fid_of(address: String) -> Result<u32, Error> {
 }
 
 #[napi]
+/// Return the owner of the fname as an optional fid (if it is owned)
+pub async fn fid_of_fname(fname: String) -> Result<Option<u32>, Error> {
+
+    let transfers: Vec<jesse::Transfer> = jesse::get_transfers_for_username(&fname)
+        .await.map_err(|_| Error::from(JesseError::Generic))?;
+
+    Ok(transfers.last().map(|transfer| transfer.to as u32))
+}
+
+
+#[napi]
+/// Holder class for the signer that can be used in registration and fname related operations
 pub struct Account {
     private_key: PrivateKeySigner
 }

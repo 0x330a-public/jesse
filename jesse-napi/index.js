@@ -310,10 +310,12 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { registerFid, ownerOfFname, transferFname, fidOf, Account } = nativeBinding
+const { registerFid, addKey, transferFname, registerFname, fidOfAddress, fidOfFname, Account } = nativeBinding
 
 module.exports.registerFid = registerFid
-module.exports.ownerOfFname = ownerOfFname
+module.exports.addKey = addKey
 module.exports.transferFname = transferFname
-module.exports.fidOf = fidOf
+module.exports.registerFname = registerFname
+module.exports.fidOfAddress = fidOfAddress
+module.exports.fidOfFname = fidOfFname
 module.exports.Account = Account
