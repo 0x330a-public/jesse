@@ -19,6 +19,9 @@ permissions:
       - .editorconfig
       - docs/**
   pull_request: null
+defaults:
+  run:
+    working-directory: jesse-napi
 jobs:
   build:
     strategy:
