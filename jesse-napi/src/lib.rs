@@ -68,6 +68,7 @@ pub async fn register_fid(
 }
 
 #[napi]
+/// Return the owner of the fname as an optional fid (if it is owned)
 pub async fn owner_of_fname(fname: String) -> Result<Option<u32>, Error> {
 
     let transfers: Vec<jesse::Transfer> = jesse::get_transfers_for_username(&fname)
