@@ -2,9 +2,6 @@
 members = ["jesse", "jesse-napi"]
 resolver = "2"
 
-[workspace.package]
-version = "0.2.2"
-
 [workspace.dependencies]
 jesse = { path = "jesse" }
 alloy = { version = "0.6.4", features = ["full", "eip712", "rpc-client", "signer-local", "signer-mnemonic"] }
