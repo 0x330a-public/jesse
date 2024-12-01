@@ -34,11 +34,5 @@
     "universal": "napi universal"
   },
   "packageManager": "yarn@4.5.2",
-  "optionalDependencies": {
-    "@0x330a/jesse-napi-win32-x64-msvc": "0.1.0",
-    "@0x330a/jesse-napi-darwin-x64": "0.1.0",
-    "@0x330a/jesse-napi-linux-x64-gnu": "0.1.0",
-    "@0x330a/jesse-napi-darwin-arm64": "0.1.0",
-    "@0x330a/jesse-napi-darwin-universal": "0.1.0"
-  }
+  "repository": "https://github.com/0x330a-public/jesse"
 }
