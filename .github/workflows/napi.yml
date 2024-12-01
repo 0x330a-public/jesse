@@ -78,7 +78,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: ${{ env.APP_NAME }}.*.node
+          path: jesse-napi/${{ env.APP_NAME }}.*.node
   universal-macOS:
     name: Build universal macOS binary
     needs:
