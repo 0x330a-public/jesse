@@ -1,7 +1,7 @@
 name: CI
 env:
   DEBUG: napi:*
-  APP_NAME: @0x330a/jesse-napi
+  APP_NAME: jesse-napi
   MACOSX_DEPLOYMENT_TARGET: '10.13'
 permissions:
   contents: write
