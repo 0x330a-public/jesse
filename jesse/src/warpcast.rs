@@ -1,6 +1,6 @@
-use alloy::sol_types::{eip712_domain, Eip712Domain, SolStruct};
 use alloy::sol;
-use alloy_primitives::{address, Address, Bytes, Signature, B256, U256};
+use alloy::sol_types::{eip712_domain, Eip712Domain, SolStruct};
+use alloy_primitives::{address, Address, Bytes, PrimitiveSignature, B256, U256};
 use eyre::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -23,14 +23,14 @@ struct TransferResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Transfer {
-    id: u64,
-    timestamp: u64,
-    username: String,
-    owner: Address,
-    from: u64,
-    to: u64,
-    user_signature: Bytes,
-    server_signature: Bytes
+    pub id: u64,
+    pub timestamp: u64,
+    pub username: String,
+    pub owner: Address,
+    pub from: u64,
+    pub to: u64,
+    pub user_signature: Bytes,
+    pub server_signature: Bytes
 }
 
 #[derive(Serialize)]
@@ -54,10 +54,10 @@ const FNAME_DOMAIN: Eip712Domain = eip712_domain! {
 /// Generate the signature hash to be signed by an alloy [alloy::signers::Signer] instance
 ///
 /// This could maybe technically be used to claim ownership of an ENS domain as well?
-pub fn fname_sign_hash(new_owner: Address, desired_username: String, timestamp: u64) -> B256 {
+pub fn fname_sign_hash(owner: Address, desired_username: String, timestamp: u64) -> B256 {
     let proof_struct = UserNameProof {
         name: desired_username,
-        owner: new_owner,
+        owner,
         timestamp: U256::from(timestamp)
     };
 
@@ -82,19 +82,18 @@ pub async fn get_transfers_for_username(name: &str) -> Result<Vec<Transfer>> {
     Ok(results.transfers)
 }
 
-
-/// Register the name with Warpcast's server, before submitting a username update to 'claim' the name
-/// by updating your user profile data
-pub async fn register_with_warpcast(
+/// Transfer the fname using Warpcast's server, letting the new user 'claim' the name by updating their user profile data
+pub async fn transfer_fname(
     username: String,
-    user_name_proof: Signature,
+    user_name_proof: PrimitiveSignature,
+    from_fid: Option<u64>,
     for_fid: u64,
     owner: Address,
     timestamp: u64) -> Result<bool> {
 
     let claim = UsernameClaim {
         name: username,
-        from: 0,
+        from: from_fid.unwrap_or_default(), // 0 default if None (equivalent to claiming)
         to: for_fid,
         fid: for_fid,
         owner,
@@ -108,14 +107,33 @@ pub async fn register_with_warpcast(
         .send().await?;
 
     Ok(results.status().is_success())
+
+}
+
+/// Register the name with Warpcast's server, before submitting a username update to 'claim' the name
+/// by updating your user profile data
+pub async fn register_with_warpcast(
+    username: String,
+    user_name_proof: PrimitiveSignature,
+    for_fid: u64,
+    owner: Address,
+    timestamp: u64) -> Result<bool> {
+
+    transfer_fname(
+        username,
+        user_name_proof,
+        None, // equivalent to transfer from_fid = 0
+        for_fid,
+        owner,
+        timestamp
+    ).await
 }
 
 
 #[cfg(test)]
 mod test {
-
-    use eyre::Result;
     use crate::{get_transfers_for_fid, get_transfers_for_username};
+    use eyre::Result;
 
     #[tokio::test]
     pub async fn test_claims_by_various_methods() -> Result<()> {

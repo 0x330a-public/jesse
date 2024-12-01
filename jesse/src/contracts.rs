@@ -4,15 +4,16 @@ use alloy::signers::Signer;
 use alloy::sol_types::{eip712_domain, Eip712Domain, SolEventInterface, SolStruct, SolValue};
 use alloy::transports::http::Http;
 use alloy::sol;
-use alloy_primitives::{address, Address, Bytes, Signature, B256, U256};
+use alloy_primitives::{address, Address, Bytes, PrimitiveSignature, B256, U256};
 use eyre::{bail, eyre, Result};
-use op_alloy_network::Optimism;
 use reqwest::Client;
 use std::time::SystemTime;
+use alloy::network::AnyNetwork;
+use alloy::rpc::types::serde_helpers::WithOtherFields;
 use alloy::rpc::types::TransactionRequest;
 
 sol! {
-    
+
     /// to encode eip712 data addFor call
     #[derive(Debug)]
     struct Add {
@@ -24,7 +25,7 @@ sol! {
         uint256 nonce;
         uint256 deadline;
     }
-    
+
     /// to encode to eip712 data registerFor call
     #[derive(Debug, Default)]
     struct Register {
@@ -61,7 +62,7 @@ sol! {
 
     #[sol(rpc)]
     interface IIdGateway is Nonces {
-        
+
         /**
          * @notice Calculate the total price to register, equal to 1 storage unit.
          *
@@ -100,7 +101,7 @@ sol! {
             address recovery,
             uint256 extraStorage
         ) external payable returns (uint256 fid, uint256 overpayment);
-        
+
         /**
         * @notice Register a new Farcaster ID (fid) to any address. A signed message from the address
         *         must be provided which approves both the to and the recovery. The address must not
@@ -119,7 +120,7 @@ sol! {
             uint256 deadline,
             bytes calldata sig
         ) external payable returns (uint256 fid, uint256 overpayment);
-    
+
         /**
          * @notice Register a new Farcaster ID (fid) to any address and rent additional storage.
          *         A signed message from the address must be provided which approves both the to
@@ -250,7 +251,7 @@ const KEY_GATEWAY_DOMAIN: Eip712Domain = eip712_domain! {
 };
 
 /// Generates bytes of a SignedKeyRequest to include as the metadata signature parameter
-pub async fn sign_key_metadata<T: Signer + Sync + Send>(signer: &T, request_fid: u64, deadline: u64, signer_public_key: [u8; 32]) -> Result<Signature> {
+pub async fn sign_key_metadata<T: Signer + Sync + Send>(signer: &T, request_fid: u64, deadline: u64, signer_public_key: [u8; 32]) -> Result<PrimitiveSignature> {
     let request = SignedKeyRequest {
         requestFid: U256::from(request_fid),
         key: Bytes::from(signer_public_key),
@@ -263,7 +264,7 @@ pub async fn sign_key_metadata<T: Signer + Sync + Send>(signer: &T, request_fid:
 }
 
 /// Get the current nonce for a given address and user, address being probably [KeyGateway] or [IdGateway]
-pub async fn get_nonce(fid_owner: Address, key_or_id_gateway: Address, provider: &impl Provider<Http<Client>, Optimism>) -> Result<u64> {
+pub async fn get_nonce(fid_owner: Address, key_or_id_gateway: Address, provider: &impl Provider<Http<Client>, AnyNetwork>) -> Result<u64> {
     let nonce_impl = Nonces::new(key_or_id_gateway, provider);
     let nonce = nonce_impl.nonces(fid_owner).call().await?;
     Ok(nonce._0.to())
@@ -285,7 +286,7 @@ pub fn register_sign_hash(owner: Address, recovery: Option<Address>, nonce: u64,
 
 /// Designed to be used by wrapping / proving a SignedKeyRequest's hash has been signed by the request_signer which owns request_fid
 /// deadlines must match signed data and this metadata and be in the future from when the block is confirmed
-pub fn sign_key_request_metadata(request_fid: u64, request_signer: Address, signed_key_request_signature: Signature, deadline: u64) -> Result<SignedKeyRequestMetadata> {
+pub fn sign_key_request_metadata(request_fid: u64, request_signer: Address, signed_key_request_signature: PrimitiveSignature, deadline: u64) -> Result<SignedKeyRequestMetadata> {
     Ok(SignedKeyRequestMetadata {
         requestSigner: request_signer,
         requestFid: U256::from(request_fid),
@@ -334,7 +335,7 @@ pub fn one_hour_deadline() -> Result<u64> {
 /// Add a key to the user's fid calling the [IKeyGateway]'s `add(uint32 keyType, bytes calldata key, uint8 metadataType, bytes calldata metadata)` function
 ///
 /// Assumes the provider can sign as well, external signing SOON tm
-pub async fn add_key<T: Signer + Sync + Send>(owner: Address, signer_public_key: [u8; 32], signer: &T, provider: &impl Provider<Http<Client>, Optimism>) -> Result<()> {
+pub async fn add_key<T: Signer + Sync + Send>(owner: Address, signer_public_key: [u8; 32], signer: &T, provider: &impl Provider<Http<Client>, AnyNetwork>) -> Result<()> {
     let fid = fid_of(owner, provider).await?;
 
     let deadline = one_hour_deadline()?;
@@ -364,10 +365,10 @@ pub async fn add_key<T: Signer + Sync + Send>(owner: Address, signer_public_key:
 pub async fn build_add_key_for(
     owner: Address,
     deadline: u64,
-    signature: Signature,
+    signature: PrimitiveSignature,
     key_bytes: [u8; 32],
     signed_key_request_metadata: SignedKeyRequestMetadata,
-    provider: &impl Provider<Http<Client>, Optimism>) -> Result<TransactionRequest> {
+    provider: &impl Provider<Http<Client>, AnyNetwork>) -> Result<WithOtherFields<TransactionRequest>> {
     let key_gateway = IKeyGateway::new(KEY_GATEWAY_ADDRESS, provider);
 
     let pending = key_gateway.addFor(
@@ -387,11 +388,11 @@ pub async fn build_add_key_for(
 pub async fn add_key_for(
     owner: Address,
     deadline: u64,
-    signature: Signature,
+    signature: PrimitiveSignature,
     key_bytes: [u8; 32],
     signed_key_request_metadata: SignedKeyRequestMetadata,
-    provider: &impl Provider<Http<Client>, Optimism>) -> Result<()> {
-    
+    provider: &impl Provider<Http<Client>, AnyNetwork>) -> Result<()> {
+
     let pending = build_add_key_for(
         owner,
         deadline,
@@ -408,14 +409,14 @@ pub async fn add_key_for(
 }
 
 /// get the owner's fid that they are registered as, or none if 0x0
-pub async fn fid_of(owner: Address, provider: &impl Provider<Http<Client>, Optimism>) -> Result<u64> {
+pub async fn fid_of(owner: Address, provider: &impl Provider<Http<Client>, AnyNetwork>) -> Result<u64> {
     let registry = IIdRegistry::new(ID_REGISTRY_ADDRESS, provider);
     let fid = registry.idOf(owner).call().await.map(|ret| ret.fid.to())?;
     Ok(fid)
 }
 
 /// Build the actual registerFor call, used by [register_fid_for], could be used to extract and sign externally
-pub async fn build_register_fid_for(for_owner: Address, recovery: Option<Address>, signature: Signature, deadline: u64, provider: &impl Provider<Http<Client>, Optimism>) -> Result<TransactionRequest> {
+pub async fn build_register_fid_for(for_owner: Address, recovery: Option<Address>, signature: PrimitiveSignature, deadline: u64, provider: &impl Provider<Http<Client>, AnyNetwork>) -> Result<WithOtherFields<TransactionRequest>> {
     let id_gateway = IIdGateway::new(ID_GATEWAY_ADDRESS, provider);
     let price = id_gateway.price_0().call().await?._0;
 
@@ -431,7 +432,7 @@ pub async fn build_register_fid_for(for_owner: Address, recovery: Option<Address
 
 /// Same as [register_fid] except designed to be called from a provider signer of a different account,
 /// letting you register for someone that doesn't want to pay TX fees, the id gateway companion to [add_key_for]
-pub async fn register_fid_for(for_owner: Address, recovery: Option<Address>, signature: Signature, deadline: u64, provider: &impl Provider<Http<Client>, Optimism>) -> Result<u64> {
+pub async fn register_fid_for(for_owner: Address, recovery: Option<Address>, signature: PrimitiveSignature, deadline: u64, provider: &impl Provider<Http<Client>, AnyNetwork>) -> Result<u64> {
     let request = build_register_fid_for(for_owner, recovery, signature, deadline, provider).await?;
 
     let tx = provider.send_transaction(request).await?
@@ -450,7 +451,7 @@ pub async fn register_fid_for(for_owner: Address, recovery: Option<Address>, sig
 
 /// sign and broadcast a register transaction, returning the signer's new fid
 /// Errors here could indicate any of the [IIdRegistryErrors] (currently unaccounted for)
-pub async fn register_fid(recovery_option: Option<Address>, provider: &impl Provider<Http<Client>, Optimism>) -> Result<u64> {
+pub async fn register_fid(recovery_option: Option<Address>, provider: &impl Provider<Http<Client>, AnyNetwork>) -> Result<u64> {
 
     // get the price for 1 storage on register
     let id_gateway = IIdGateway::new(ID_GATEWAY_ADDRESS, provider);
@@ -481,6 +482,7 @@ mod tests {
     use crate::contracts::Nonces::NoncesInstance;
     use crate::contracts::{add_key, add_key_for, register_sign_hash, register_fid, register_fid_for, ID_GATEWAY_ADDRESS, KEY_GATEWAY_ADDRESS};
     use crate::{key_add_sign_hash, one_hour_deadline, sign_key_request_metadata, sign_key_request_sign_hash};
+    use alloy::network::AnyNetwork;
     use alloy::signers::local::PrivateKeySigner;
     use alloy::signers::Signer;
     use alloy_primitives::utils::parse_ether;
@@ -490,7 +492,6 @@ mod tests {
     use ed25519_dalek::ed25519::signature::rand_core::OsRng;
     use ed25519_dalek::{SigningKey, VerifyingKey};
     use eyre::Result;
-    use op_alloy_network::Optimism;
 
     #[tokio::test]
     async fn test_basic_anvil_register_add() -> Result<()> {
@@ -502,7 +503,7 @@ mod tests {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(app_wallet.clone())
-            .network::<Optimism>()
+            .network::<AnyNetwork>()
             .on_http(rpc_url.parse()?);
 
         let app_address = app_signer.address();
@@ -534,7 +535,7 @@ mod tests {
         let provider = ProviderBuilder::new()
             .with_recommended_fillers()
             .wallet(app_wallet.clone())
-            .network::<Optimism>()
+            .network::<AnyNetwork>()
             .on_http(rpc_url.parse()?);
 
         let app_address = app_signer.address();

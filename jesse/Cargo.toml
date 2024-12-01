@@ -1,0 +1,23 @@
+[package]
+name = "jesse"
+version = "0.2.2"
+authors = ["0x330a"]
+edition = "2021"
+description = "Register and add signers to the farcaster network easily"
+license = "MIT"
+
+[dependencies]
+reqwest = "0.12"
+alloy-primitives = "0.8"
+alloy = { workspace = true }
+serde = "1"
+eyre = "0.6"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+alloy-rpc-types-anvil = "0.6"
+alloy-provider = { version = "0.6", features = ["anvil-api", "anvil-node"] }
+alloy-node-bindings = { version = "0.6" }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+serde_json = "1"

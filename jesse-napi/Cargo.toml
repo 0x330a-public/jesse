@@ -1,0 +1,22 @@
+[package]
+edition = "2021"
+name = "jesse-napi"
+version = "0.1.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
+napi = { version = "2", default-features = false, features = ["napi4", "async"] }
+napi-derive = "2"
+jesse = { workspace = true }
+alloy = { workspace = true }
+thiserror = "2"
+
+[build-dependencies]
+napi-build = "2.1.3"
+
+[profile.release]
+lto = true
+strip = "symbols"

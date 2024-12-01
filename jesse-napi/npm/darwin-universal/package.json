@@ -1,0 +1,15 @@
+{
+  "name": "jesse-napi-darwin-universal",
+  "version": "0.1.0",
+  "os": [
+    "darwin"
+  ],
+  "main": "jesse-napi.darwin-universal.node",
+  "files": [
+    "jesse-napi.darwin-universal.node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  }
+}
